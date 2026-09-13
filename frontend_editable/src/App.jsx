@@ -1,38 +1,133 @@
-import React,{useEffect,useState} from 'react';
-import {api} from './api';
-import {scenarios,sampleSop} from './demo';
-const show=v=>v==null?'Unavailable':String(v);
-function Panel({title,tag,children}){return <section className="panel"><div className="panel-head"><h2>{title}</h2>{tag&&<span className="label">{tag}</span>}</div>{children}</section>}
-export default function App(){
- const [mode,setMode]=useState('demo'),[scenario,setScenario]=useState('tracking'),[camera,setCamera]=useState(''),[snapshot,setSnapshot]=useState(null),[status,setStatus]=useState(null),[error,setError]=useState(''),[updated,setUpdated]=useState(null),[incidentId,setIncidentId]=useState(''),[sop,setSop]=useState(null),[checks,setChecks]=useState({}),[ack,setAck]=useState(false),[question,setQuestion]=useState(''),[answer,setAnswer]=useState(null),[busy,setBusy]=useState(false),[file,setFile]=useState(null),[fileUrl,setFileUrl]=useState('');
- const demo=mode==='demo',scene=scenarios[scenario];
- const incidents=demo?(scene.issue?[{incident_id:'DEMO-'+scenario,title:scene.issue,severity:'caution',status:ack?'acknowledged':'active',sop_id:sampleSop.sop_id,evidence:['Simulated scenario; no model assessment.']}]:[]):snapshot?.incidents||[];
- const incident=incidents.find(x=>x.incident_id===incidentId)||incidents[0];
- useEffect(()=>{setChecks({});setAck(false);setAnswer(null);setSop(null)},[mode,scenario,incidentId]);
- useEffect(()=>{if(!file){setFileUrl('');return}const url=URL.createObjectURL(file);setFileUrl(url);return()=>URL.revokeObjectURL(url)},[file]);
- useEffect(()=>{
-  setSnapshot(null);setStatus(null);setUpdated(null);setError('');if(demo)return;
-  const controller=new AbortController();let timer;
-  async function poll(){try{const data=await api.snapshot(controller.signal);const id=camera||data.cameras[0]?.camera_id;const current=id?await api.status(id,controller.signal):null;if(controller.signal.aborted)return;setSnapshot(data);setStatus(current);setUpdated(new Date());setError('');}catch(e){if(!controller.signal.aborted){setError(e.message);setSnapshot(null);setStatus(null)}}finally{if(!controller.signal.aborted)timer=setTimeout(poll,2000)}}
-  poll();return()=>{controller.abort();clearTimeout(timer)};
- },[mode,camera]);
- useEffect(()=>{if(demo||!incident?.sop_id){setSop(null);return}const c=new AbortController();api.sop(incident.sop_id,c.signal).then(setSop).catch(()=>{if(!c.signal.aborted)setSop(null)});return()=>c.abort()},[mode,incident?.sop_id]);
- const procedure=demo?(incident?sampleSop:null):sop;
- const observation=demo?null:status?.observation;
- const stale=!demo&&(!observation?.received_at||Date.now()-Date.parse(observation.received_at)>10000||!Number.isFinite(Date.parse(observation.received_at)));
- const metrics=demo?[scene.count,'Simulated',scene.visibility,scene.direction,'Demo only','Model not connected']:[observation?.detected_heads,observation?.tracking_state,observation?.visibility_status,observation?.dominant_direction,observation?.processing_fps,'Model not connected'];
- async function acknowledge(){if(demo){setAck(true);return}try{await api.acknowledge(incident.incident_id);setAck(true)}catch(e){setError(e.message)}}
- async function ask(e){e.preventDefault();if(!question.trim())return;setBusy(true);setAnswer(null);try{if(demo)setAnswer({response_origin:'scripted_demo',text:`${incident?.title||'No active incident'} — this is a simulated example. ${procedure?procedure.reactive.join(' '):'No incident procedure selected.'} Live observations and an LLM are not connected.`,incident_id:incident?.incident_id,sop_version:procedure?.version});else setAnswer(await api.ask({question,incident_id:incident?.incident_id||null,observation_timestamp:observation?.received_at||null,sop_version:procedure?.version||null}));}catch(e){setAnswer({response_origin:'unavailable',text:e.message})}finally{setBusy(false)}}
- return <div className="shell"><aside><div className="brand"><span className="brand-symbol">◎</span><div>EVENT HORIZON<small>CROWD INTELLIGENCE</small></div></div><div className="section-label">WORKSPACE</div><a className="nav active" href="#overview">◫ &nbsp; Operations overview</a><a className="nav" href="#incidents">⚑ &nbsp; Incident center</a><a className="nav" href="#sop">☷ &nbsp; SOP response</a><a className="nav" href="#assistant">◇ &nbsp; Operator assistant</a><div className="sidebar-note"><span className="dot"/> OPERATOR PROTOTYPE<p>Evidence-led monitoring.<br/>Human-authorized response.</p><small>No automated public actions</small></div></aside>
- <main id="overview"><header><div><div className="section-label">OPERATOR WORKSPACE</div><strong>Live evidence board</strong></div><div className="header-actions"><div className="segmented">{['demo','backend'].map(x=><button key={x} className={mode===x?'selected':''} onClick={()=>{setMode(x);setCamera('');setIncidentId('')}}>{x}</button>)}</div><span className={'badge '+(demo?'amber':error?'red':'')}>{demo?'DEMO DATA':error?'DISCONNECTED':'BACKEND MODE'}</span><span className="label">{updated?updated.toLocaleTimeString():'No backend update'}</span></div></header>
- <div className="workspace"><div className="page-title"><div className="section-label">VENUE OPERATIONS / EVIDENCE & RESPONSE</div><h1>Crowd monitoring</h1><p>Understand the movement. Verify the evidence. Coordinate the response.</p></div>
- {!demo&&(error||stale)&&<div className="warning" role="status">{error?'Backend disconnected. '+error:'Observation stale or timestamp unavailable.'} No demo fallback is being used.</div>}
- <div className="toolbar"><label>CAMERA <select value={demo?'demo':camera} onChange={e=>setCamera(e.target.value)}>{demo?<option value="demo">Camera 01 / Main concourse</option>:<><option value="">Select / first available</option>{snapshot?.cameras.map(x=><option key={x.camera_id} value={x.camera_id}>{x.name}</option>)}</>}</select></label>{demo&&<label>SCENARIO <select value={scenario} onChange={e=>setScenario(e.target.value)}>{Object.entries(scenarios).map(([k,v])=><option value={k} key={k}>{v.title}</option>)}</select></label>}<span className="label">{demo?'SIMULATED INPUT':status?.source_id||'NO SOURCE'}</span></div>
- <div className="columns"><div><Panel title="Camera observation" tag={demo?'SIMULATED ANALYSIS':'BACKEND EVIDENCE'}><div className="video-stage">{fileUrl?<video src={fileUrl} controls/>:<div className="video-empty"><div className="target">⊕</div><h3>{demo?'Camera preview':'Awaiting connected video'}</h3><p>Choose a video to preview locally.</p><span className="badge amber">NO VIDEO ANALYSIS CONNECTED</span></div>}<span className="video-corner">CAM 01 · {fileUrl?'LOCAL PREVIEW':'NO STREAM'}</span></div><div className="video-controls"><label className="button">Choose video<input type="file" accept="video/*" onChange={e=>setFile(e.target.files?.[0]||null)}/></label>{file&&<button onClick={()=>setFile(null)}>Clear</button>}<span className="label">{file?file.name:'Local preview does not start analysis'}</span></div><div className="overlays">{['Detections','Trajectories','Optical flow','Zones','Forecasts'].map(x=><label key={x} title="Requires synchronized backend overlay data"><input type="checkbox" disabled/>{x}</label>)}<small>Overlays not connected</small></div></Panel>
- <div className="metrics">{['Detected heads','Tracking support','Visibility','Image motion','Processing FPS','Forecast'].map((label,i)=><div className="metric" key={label}><span>{label}</span><strong>{show(metrics[i])}</strong><small>{demo?'SIMULATED':stale?'STALE / UNVERIFIED':'BACKEND FIELD'}</small></div>)}</div>
- <Panel title="Evidence timeline" tag="CURRENT CONTEXT"><div className="timeline"><span className="dot"/><div><strong>{demo?'Scenario selected':updated?'Backend response received':'Waiting for evidence'}</strong><p>{demo?'Simulated states demonstrate the interface; they are not recorded model results.':`Observation time: ${observation?.received_at||'Unavailable'}. Stream updates are polled every two seconds.`}</p></div></div></Panel>
- <section id="assistant"><Panel title="Event Horizon Assistant" tag={demo?'SCRIPTED DEMO':'SERVER-SIDE ASSISTANT'}><div className="assistant-body"><p>Ask about the evidence and the selected procedure.</p><div className="suggestions">{['What changed?','What should I check now?','What information is missing?'].map(x=><button key={x} onClick={()=>setQuestion(x)}>{x}</button>)}</div>{answer&&<div className="answer" role="status"><span className="label">{answer.response_origin||'backend response'}</span><p>{answer.text||'No explanation supplied.'}</p><small>Incident: {answer.incident_id||'—'} · SOP version: {answer.sop_version||'—'}</small></div>}<form onSubmit={ask}><input aria-label="Ask the assistant" placeholder="Ask about this situation…" value={question} onChange={e=>setQuestion(e.target.value)}/><button disabled={busy||(!demo&&!!error)}>{busy?'Waiting…':'Ask →'}</button></form><small>Checklist remains available without the LLM. No API keys belong in this frontend.</small></div></Panel></section>
- </div><div><section id="incidents"><Panel title="Incident center" tag={`${incidents.length} LISTED`}><div className="incident-list">{incidents.length?incidents.map(x=><button key={x.incident_id} onClick={()=>setIncidentId(x.incident_id)} className={'incident '+(incident?.incident_id===x.incident_id?'chosen':'')}><span className="badge amber">{x.severity||'REVIEW'}</span><strong>{x.title}</strong><small>{x.incident_id} · {demo&&ack?'acknowledged':x.status}</small></button>):<p>No incidents supplied. This does not establish crowd safety.</p>}</div></Panel></section>
- <Panel title="Incident evidence" tag="REVIEW REQUIRED"><div className="body"><h3>{incident?.title||'No selected incident'}</h3>{(incident?.evidence||['Evidence unavailable']).map((x,i)=><p key={i}>{x}</p>)}<div className="callout">Agreement between tracking and optical flow is not surge-detection accuracy. Camera motion may affect both.</div></div></Panel>
- <section id="sop"><Panel title="Response procedure" tag={procedure?.sop_id||'UNAVAILABLE'}><div className="body">{procedure?<><span className="badge amber">{procedure.approval_status}</span><h3>{procedure.title}</h3><small>Version {procedure.version}</small>{['reactive','proactive','escalation','recovery'].map(group=><div key={group}><h4>{group}</h4>{(procedure[group]||[]).map((text,i)=><label className="check" key={i}><input type="checkbox" checked={!!checks[group+i]} onChange={e=>setChecks({...checks,[group+i]:e.target.checked})}/><span>{text}</span></label>)}</div>)}<button className="primary" disabled={ack||incident?.status==='acknowledged'} onClick={acknowledge}>{ack||incident?.status==='acknowledged'?'Acknowledged':demo?'Acknowledge locally':'Acknowledge incident'}</button><p className="label">Checklist selections are local session notes.</p></>:<p>Select an incident with an available procedure.</p>}</div></Panel></section></div></div><footer>EVENT HORIZON / OPERATOR BUILD 0.1 <span>Observed · Missing · Simulated — kept distinct</span></footer></div></main></div>
+import { useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useVenueStore, selectStale, isDemo } from './store/useVenueStore';
+import { useForecast, useSelectedZone } from './store/derived';
+import VenueScene from './components/digitalTwin/VenueScene';
+import ForecastPanel from './components/dashboard/ForecastPanel';
+import ScenarioControls from './components/dashboard/ScenarioControls';
+import ZoneTelemetry from './components/dashboard/ZoneTelemetry';
+import CameraPanel from './components/dashboard/CameraPanel';
+import ResponsePanel from './components/dashboard/ResponsePanel';
+import AssistantPanel from './components/dashboard/AssistantPanel';
+import { NEO, MONO } from './theme';
+
+const MODES = ['demo', 'backend'];
+
+export default function App() {
+  const mode = useVenueStore((state) => state.mode);
+  const setMode = useVenueStore((state) => state.setMode);
+  const error = useVenueStore((state) => state.error);
+  const updatedAt = useVenueStore((state) => state.updatedAt);
+  const stale = useVenueStore(selectStale);
+  const zone = useSelectedZone();
+  const forecast = useForecast();
+  const demo = useVenueStore(isDemo);
+  const replayDemoSignals = useVenueStore((state) => state.replayDemoSignals);
+  const stopPolling = useVenueStore((state) => state.stopPolling);
+
+  // Seed the demo signal feed once, and tear down timers on unmount.
+  useEffect(() => {
+    replayDemoSignals();
+    return () => stopPolling();
+  }, [replayDemoSignals, stopPolling]);
+
+  const degraded = !demo && (Boolean(error) || stale);
+  const statusTone = demo ? 'amber' : error ? 'red' : stale ? 'amber' : '';
+  const statusText = demo ? 'DEMO DATA' : error ? 'DISCONNECTED' : stale ? 'STALE' : 'BACKEND LIVE';
+
+  return (
+    <div className="shell">
+      <div className="twin-pane">
+        <VenueScene />
+      </div>
+
+      <div className="console-pane">
+        <header className="console-head">
+          <div>
+            <div className="console-eyebrow">EVENT HORIZON / CROWD INTELLIGENCE</div>
+            <div className="console-title">
+              {zone ? `ZONE ${zone.id} TELEMETRY` : 'VENUE RESILIENCE TWIN'}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div className="segmented">
+              {MODES.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  className={mode === option ? 'selected' : ''}
+                  onClick={() => setMode(option)}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+            <div className={`status-pill ${statusTone}`}>
+              <span className="status-dot" />
+              {statusText}
+            </div>
+          </div>
+        </header>
+
+        <div className="console-body">
+          {degraded && (
+            <div className="warning-bar" role="status">
+              {error
+                ? `Backend disconnected. ${error}`
+                : 'Observation stale or timestamp unavailable.'}{' '}
+              No demo fallback is being used.
+            </div>
+          )}
+
+          <ForecastPanel />
+          <ScenarioControls />
+
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={zone?.id || 'no-zone'}
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -14 }}
+              transition={{ duration: 0.16 }}
+            >
+              <ZoneTelemetry />
+            </motion.div>
+          </AnimatePresence>
+
+          <CameraPanel />
+          <ResponsePanel />
+          <AssistantPanel />
+
+          <p style={disclaimerStyle}>
+            Observed, missing and simulated evidence are kept distinct throughout this console. Nothing here
+            establishes crowd safety, and no public announcement or physical operation is triggered from this
+            interface.
+          </p>
+        </div>
+
+        <footer className="console-foot">
+          <span style={{ color: NEO.grey }}>EVENT HORIZON OPERATOR CONSOLE v0.2.0</span>
+          <span style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ color: forecast.origin === 'observed' ? NEO.green : NEO.amber }}>
+              {forecast.origin === 'observed' ? '● GRID FROM BACKEND' : '○ GRID SIMULATED'}
+            </span>
+            <span style={{ color: demo ? NEO.amber : error ? NEO.red : NEO.green }}>
+              {demo ? '○ DEMO MODE' : updatedAt ? `● ${updatedAt.toLocaleTimeString()}` : '○ NO UPDATE'}
+            </span>
+          </span>
+        </footer>
+      </div>
+    </div>
+  );
 }
+
+const disclaimerStyle = {
+  fontFamily: MONO,
+  fontSize: 9,
+  lineHeight: 1.8,
+  color: NEO.grey,
+  border: `2px dashed ${NEO.line}`,
+  padding: '10px 12px',
+  marginBottom: 4,
+};
