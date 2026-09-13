@@ -32,3 +32,5 @@ weights/
 *.pt
 *.mp4
 *.avi
+# The unanchored data/ rule above is for ML datasets; frontend source is not data.
+!frontend_editable/src/data/
