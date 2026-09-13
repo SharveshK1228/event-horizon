@@ -1,0 +1,26 @@
+{
+  "grouping_reviewed": false,
+  "recordings": [
+    {
+      "video_id": "recording_a",
+      "event_group": "CONFIRM_INDEPENDENT_EVENT_a",
+      "split": "train",
+      "audit": "../data/recording_a/audit.json",
+      "labelled_features": "../data/recording_a/labelled.jsonl"
+    },
+    {
+      "video_id": "recording_b",
+      "event_group": "CONFIRM_INDEPENDENT_EVENT_b",
+      "split": "validation",
+      "audit": "../data/recording_b/audit.json",
+      "labelled_features": "../data/recording_b/labelled.jsonl"
+    },
+    {
+      "video_id": "recording_c",
+      "event_group": "CONFIRM_INDEPENDENT_EVENT_c",
+      "split": "test",
+      "audit": "../data/recording_c/audit.json",
+      "labelled_features": "../data/recording_c/labelled.jsonl"
+    }
+  ]
+}

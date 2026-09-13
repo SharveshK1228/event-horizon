@@ -1,0 +1,6 @@
+# Use the existing Event Horizon virtual environment. No TensorFlow or dashboard needed.
+numpy>=1.24,<3
+scikit-learn>=1.3,<2
+joblib>=1.3,<2
+# Video extraction additionally needs the existing opencv-python and ultralytics install.
+# Keep your working CUDA PyTorch installation.

@@ -1,0 +1,5 @@
+# Add to the existing Python 3.11 project environment; retain its working CUDA PyTorch install.
+streamlit>=1.45,<2
+pandas>=2,<3
+# Already required by the tracking environment:
+# ultralytics, opencv-python, numpy, torch, lap

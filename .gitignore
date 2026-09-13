@@ -17,3 +17,18 @@ outputs/**/*.avi
 outputs/**/*.png
 outputs/**/*.jpg
 outputs/**/*.zip
+.venv/
+__pycache__/
+*.py[cod]
+.env
+node_modules/
+dist/
+
+backend/Abnormal High-density Crowds/
+outputs/
+runs/
+weights/
+
+*.pt
+*.mp4
+*.avi

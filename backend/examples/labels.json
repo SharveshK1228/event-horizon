@@ -1,0 +1,15 @@
+{
+  "video_id": "recording_b",
+  "source_video": "CONFIRM_MATCHING_VIDEO_FILENAME",
+  "zone": "Full view",
+  "intervals": [
+    {
+      "start_s": 0,
+      "end_s": 13.4301,
+      "state": "unknown",
+      "visibility": "unreviewed",
+      "reviewer": "",
+      "notes": "Split into reviewed intervals; never label an entire abnormal folder as surge."
+    }
+  ]
+}

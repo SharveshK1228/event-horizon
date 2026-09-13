@@ -1,0 +1,88 @@
+{
+  "SOP-VERIFY-01": {
+    "sop_id": "SOP-VERIFY-01",
+    "version": "0.1-demo",
+    "title": "Verify camera and tracking evidence",
+    "approval_status": "Sample SOP — demonstration only",
+    "responsible_role": "Control-room operator",
+    "reactive": [
+      "Verify that the selected camera image is current and readable.",
+      "Check for obstruction, camera movement or a changed field of view.",
+      "Review another available camera view when the current assessment remains unavailable."
+    ],
+    "proactive": [
+      "Monitor whether tracking support recovers for a sustained interval.",
+      "Keep the designated supervisor informed if reliable assessment cannot be restored."
+    ],
+    "escalation": [
+      "Follow the venue-approved escalation procedure if reliable observation remains unavailable."
+    ],
+    "recovery": [
+      "Confirm that usable evidence has returned; restored tracking alone does not establish crowd safety."
+    ]
+  },
+  "SOP-VISIBILITY-01": {
+    "sop_id": "SOP-VISIBILITY-01",
+    "version": "0.1-demo",
+    "title": "Respond to degraded camera visibility",
+    "approval_status": "Sample SOP — demonstration only",
+    "responsible_role": "Control-room operator",
+    "reactive": [
+      "Inspect the live image for smoke, spray, glare or physical obstruction.",
+      "Treat count and flow conclusions from this view as unreliable.",
+      "Review another available camera view."
+    ],
+    "proactive": [
+      "Monitor visibility and prepare a maintenance or supervisor escalation if it persists."
+    ],
+    "escalation": [
+      "Use only the venue-approved communication chain; do not infer an evacuation route from this alert."
+    ],
+    "recovery": [
+      "Close only after visibility and evidence quality remain usable for the configured recovery interval."
+    ]
+  },
+  "SOP-CAMERA-01": {
+    "sop_id": "SOP-CAMERA-01",
+    "version": "0.1-demo",
+    "title": "Verify suspected camera movement",
+    "approval_status": "Sample SOP — demonstration only",
+    "responsible_role": "Control-room operator",
+    "reactive": [
+      "Check whether the camera moved, zoomed or changed scene.",
+      "Suspend motion-based conclusions until the view stabilizes.",
+      "Re-establish the analysis reference after stabilization."
+    ],
+    "proactive": [
+      "Record the affected interval so it is excluded from model evaluation."
+    ],
+    "escalation": [
+      "Escalate persistent camera instability through the approved technical-support process."
+    ],
+    "recovery": [
+      "Resume interpretation only after a stable reference has been established."
+    ]
+  },
+  "SOP-CROWD-01": {
+    "sop_id": "SOP-CROWD-01",
+    "version": "0.1-demo",
+    "title": "Verify unusual collective movement",
+    "approval_status": "Sample SOP — demonstration only",
+    "responsible_role": "Authorized venue operator",
+    "reactive": [
+      "Review the highlighted zone and supporting camera evidence.",
+      "Confirm the observation using another available source or an authorized observer.",
+      "Record whether the movement is crowd-driven, camera-driven or inconclusive."
+    ],
+    "proactive": [
+      "Continue monitoring direction changes, visibility and tracking reliability.",
+      "Prepare the venue-approved escalation path if verified conditions worsen."
+    ],
+    "escalation": [
+      "Only an authorized operator may initiate physical crowd-control actions or public announcements."
+    ],
+    "recovery": [
+      "Resolve after authorized verification and a sustained return to the venue-defined normal condition."
+    ]
+  }
+}
