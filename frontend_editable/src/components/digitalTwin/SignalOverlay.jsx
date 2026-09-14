@@ -1,4 +1,5 @@
 import { useVenueStore } from '../../store/useVenueStore';
+import { useForecast } from '../../store/derived';
 import OverlayPanel from './OverlayPanel';
 import { NEO, MONO } from '../../theme';
 
@@ -20,7 +21,35 @@ const VISIBLE_ENTRIES = 5;
  */
 export default function SignalOverlay() {
   const signals = useVenueStore((state) => state.signals);
+  const forecast = useForecast();
   const shown = signals.slice(0, VISIBLE_ENTRIES);
+
+  /**
+   * Download the feed and the forecast it was read against as one JSON file.
+   * Every entry keeps its provenance tag, so the export is an audit trail of
+   * what the console showed and where each line came from — never a claim
+   * about what happened in the venue.
+   */
+  const exportLog = () => {
+    const state = useVenueStore.getState();
+    const payload = {
+      exported_at: new Date().toISOString(),
+      mode: state.mode,
+      scenario: state.scenario,
+      horizon_s: state.horizon,
+      threshold_tracks: state.threshold,
+      forecast,
+      signals: [...signals].reverse(),
+      note: 'Console evidence log. Entries tagged simulated are authored demo data, not observations.',
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `event-horizon-evidence-${state.scenario}-${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <OverlayPanel
@@ -82,9 +111,39 @@ export default function SignalOverlay() {
           })
         )}
       </div>
+      <div style={footerStyle}>
+        <span style={{ color: NEO.grey }}>{signals.length} entries · each tagged with its origin</span>
+        <button type="button" onClick={exportLog} disabled={!signals.length} style={exportStyle}>
+          EXPORT LOG
+        </button>
+      </div>
     </OverlayPanel>
   );
 }
+
+const footerStyle = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: 8,
+  padding: '6px 10px',
+  borderTop: `2px solid ${NEO.ink}`,
+  fontFamily: MONO,
+  fontSize: 8,
+};
+
+const exportStyle = {
+  border: `2px solid ${NEO.ink}`,
+  background: NEO.surface,
+  color: NEO.ink,
+  fontFamily: MONO,
+  fontSize: 8,
+  fontWeight: 900,
+  letterSpacing: '0.08em',
+  padding: '3px 7px',
+  cursor: 'pointer',
+  borderRadius: 2,
+};
 
 const badgeStyle = {
   display: 'flex',

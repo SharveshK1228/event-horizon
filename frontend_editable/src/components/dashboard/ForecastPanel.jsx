@@ -1,5 +1,5 @@
 import { useVenueStore } from '../../store/useVenueStore';
-import { useForecast, useZones } from '../../store/derived';
+import { useForecast, useZones, useTimeline } from '../../store/derived';
 import { NEO, MONO, HARD } from '../../theme';
 
 /**
@@ -10,7 +10,19 @@ import { NEO, MONO, HARD } from '../../theme';
 export default function ForecastPanel() {
   const forecast = useForecast();
   const zones = useZones();
+  const timeline = useTimeline();
   const horizon = useVenueStore((state) => state.horizon);
+
+  // On a timeline scenario the headline is the lead time: how far ahead of
+  // the onset density the projection crosses the operator's threshold.
+  const lead = timeline?.lead ?? null;
+  const warning = lead
+    ? lead.leadSeconds == null
+      ? { value: '—', sub: 'no onset on timeline', color: NEO.grey }
+      : lead.leadSeconds > 0
+        ? { value: `${lead.leadSeconds}s`, sub: 'before onset', color: lead.leadSeconds >= 30 ? NEO.green : NEO.amber }
+        : { value: 'NONE', sub: 'threshold too high', color: NEO.red }
+    : null;
 
   const available = forecast.status !== 'UNAVAILABLE';
   const flagged = zones.filter((zone) => zone.flagged).length;
@@ -42,10 +54,11 @@ export default function ForecastPanel() {
         EVENT HORIZON / CONCENTRATION FORECAST
       </div>
 
-      <div style={metricsRowStyle}>
+      <div style={{ ...metricsRowStyle, gridTemplateColumns: `repeat(${warning ? 4 : 3}, minmax(0, 1fr))` }}>
         <Metric label="FORECAST" value={available ? (flagged ? 'REVIEW' : 'RUNNING') : 'SUSPENDED'} sub={`at +${horizon}s`} accent={accent} />
         <Metric label="FLAGGED ZONES" value={available ? `${flagged}/9` : '—'} sub="above threshold" accent={accent} />
         <Metric label="TRACK COVERAGE" value={coverage} sub="of detections" accent={accent} />
+        {warning && <Metric label="WARNING" value={warning.value} sub={warning.sub} accent={warning.color} />}
       </div>
 
       <div style={actionsStyle}>

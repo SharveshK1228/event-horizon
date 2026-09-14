@@ -97,9 +97,14 @@ export default function App() {
             </motion.div>
           </AnimatePresence>
 
-          <CameraPanel />
+          {/* Anchors let the pitch walkthrough scroll the console to a panel. */}
+          <div id="camera-panel">
+            <CameraPanel />
+          </div>
           <ResponsePanel />
-          <AssistantPanel />
+          <div id="assistant-panel">
+            <AssistantPanel />
+          </div>
 
           <p style={disclaimerStyle}>
             Observed, missing and simulated evidence are kept distinct throughout this console. Nothing here

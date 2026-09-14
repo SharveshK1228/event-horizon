@@ -12,6 +12,7 @@ import SceneEffects from './SceneEffects';
 import SignalOverlay from './SignalOverlay';
 import ViewControls from '../dashboard/ViewControls';
 import OverlayPanel from './OverlayPanel';
+import PitchGuide from './PitchGuide';
 import { NEO, MONO, HARD, DENSITY_BANDS } from '../../theme';
 
 const LEGEND = [
@@ -143,6 +144,10 @@ export default function VenueScene() {
 
       <div style={{ position: 'absolute', bottom: 16, left: 16, zIndex: 10, width: 300 }}>
         <SignalOverlay />
+      </div>
+
+      <div style={{ position: 'absolute', bottom: 52, right: 16, zIndex: 10 }}>
+        <PitchGuide />
       </div>
 
       <div style={tipStyle}>DRAG TO ROTATE • SCROLL TO ZOOM • RIGHT-CLICK DRAG TO PAN • CLICK A ZONE</div>
