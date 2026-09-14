@@ -76,6 +76,25 @@ export default function SceneEffects() {
         sunColor: new THREE.Color('#FF8833'),
         sunIntensity: 1.1,
       },
+      // Timeline scenarios: an end-of-event egress reads as late light, and the
+      // crush timeline darkens further so the twin does not look calm while the
+      // exit funnel is in the band the console is warning about.
+      surge: {
+        background: new THREE.Color('#E9DCC9'),
+        fogColor: new THREE.Color('#E9DCC9'),
+        fogDensity: 0.005,
+        ambientIntensity: 1.0,
+        sunColor: new THREE.Color('#FFB25E'),
+        sunIntensity: 0.95,
+      },
+      crush: {
+        background: new THREE.Color('#DCC4BC'),
+        fogColor: new THREE.Color('#DCC4BC'),
+        fogDensity: 0.008,
+        ambientIntensity: 0.9,
+        sunColor: new THREE.Color('#E2653C'),
+        sunIntensity: 1.0,
+      },
     }),
     [],
   );

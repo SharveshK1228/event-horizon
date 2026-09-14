@@ -1,5 +1,6 @@
 import { useVenueStore } from '../../store/useVenueStore';
-import { NEO, MONO, HARD } from '../../theme';
+import OverlayPanel from './OverlayPanel';
+import { NEO, MONO } from '../../theme';
 
 const SOURCE_ACCENT = {
   Detector: NEO.orange,
@@ -22,12 +23,19 @@ export default function SignalOverlay() {
   const shown = signals.slice(0, VISIBLE_ENTRIES);
 
   return (
-    <div style={shellStyle}>
-      <div style={headStyle}>
-        <span>▸ SIGNAL FEED</span>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: NEO.green }} />
-      </div>
-
+    <OverlayPanel
+      title="Signal feed"
+      tone="dark"
+      width={300}
+      // The count stays readable while minimised, so collapsing the feed never
+      // hides the fact that new evidence has arrived.
+      badge={
+        <span style={badgeStyle}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: NEO.green }} />
+          {signals.length}
+        </span>
+      }
+    >
       <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
         {shown.length === 0 ? (
           <div style={emptyStyle}>AWAITING EVIDENCE…</div>
@@ -74,30 +82,17 @@ export default function SignalOverlay() {
           })
         )}
       </div>
-    </div>
+    </OverlayPanel>
   );
 }
 
-const shellStyle = {
-  pointerEvents: 'auto',
-  width: '300px',
-  background: NEO.surface,
-  border: HARD.border,
-  boxShadow: HARD.shadow,
-  fontFamily: MONO,
-};
-
-const headStyle = {
-  background: NEO.ink,
-  color: NEO.surface,
-  padding: '8px 12px',
+const badgeStyle = {
   display: 'flex',
   alignItems: 'center',
-  justifyContent: 'space-between',
-  fontSize: '11px',
-  fontWeight: 'bold',
-  letterSpacing: '0.1em',
-  textTransform: 'uppercase',
+  gap: 5,
+  fontFamily: MONO,
+  fontSize: 9,
+  color: NEO.bg,
 };
 
 const rowStyle = {

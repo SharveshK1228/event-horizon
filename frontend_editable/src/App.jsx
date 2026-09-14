@@ -5,6 +5,7 @@ import { useForecast, useSelectedZone } from './store/derived';
 import VenueScene from './components/digitalTwin/VenueScene';
 import ForecastPanel from './components/dashboard/ForecastPanel';
 import ScenarioControls from './components/dashboard/ScenarioControls';
+import TimelineControls from './components/dashboard/TimelineControls';
 import ZoneTelemetry from './components/dashboard/ZoneTelemetry';
 import CameraPanel from './components/dashboard/CameraPanel';
 import ResponsePanel from './components/dashboard/ResponsePanel';
@@ -82,6 +83,7 @@ export default function App() {
 
           <ForecastPanel />
           <ScenarioControls />
+          <TimelineControls />
 
           <AnimatePresence mode="wait">
             <motion.div

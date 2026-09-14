@@ -34,3 +34,6 @@ weights/
 *.avi
 # The unanchored data/ rule above is for ML datasets; frontend source is not data.
 !frontend_editable/src/data/
+
+# Uploaded demo clips are local runtime state, never committed.
+backend/api/uploads/

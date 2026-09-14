@@ -11,9 +11,9 @@ import {
 } from 'recharts';
 import { useVenueStore, isDemo } from '../../store/useVenueStore';
 import { useForecast, useZones, useSelectedZone } from '../../store/derived';
-import { ZONE_LABELS } from '../../data/venueModel';
+import { ZONE_AREA_M2, ZONE_LABELS } from '../../data/venueModel';
 import { Panel, StatCard, Callout, ProvenanceTag } from './primitives';
-import { NEO, MONO, densityStep } from '../../theme';
+import { NEO, MONO, densityStep, densityBand } from '../../theme';
 
 /** Per-zone telemetry for the cell selected in the twin. */
 export default function ZoneTelemetry() {
@@ -99,6 +99,36 @@ export default function ZoneTelemetry() {
           />
         </div>
 
+        {/* Area density exists only for simulated grids, where the zone's
+            floor area is defined. A backend forecast counts tracks in image
+            cells and supplies no area, so the row disappears entirely. */}
+        {zone.density != null && (
+          <div style={{ ...densityRowStyle, borderLeft: `3px solid ${densityBand(zone.density).color}` }}>
+            <div>
+              <div style={captionStyle}>SIMULATED AREA DENSITY @ +{horizon}s</div>
+              <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 900, color: NEO.ink }}>
+                {zone.density.toFixed(2)}
+                <span style={{ fontSize: 10, color: NEO.grey }}> persons/m²</span>
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div
+                style={{
+                  fontFamily: MONO,
+                  fontSize: 9,
+                  fontWeight: 900,
+                  color: densityBand(zone.density).color,
+                }}
+              >
+                {densityBand(zone.density).label}
+              </div>
+              <div style={{ fontFamily: MONO, fontSize: 8, color: NEO.grey, marginTop: 3 }}>
+                OVER A SIMULATED {ZONE_AREA_M2} m² ZONE
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Share of region occupancy */}
         <div style={{ marginTop: 14 }}>
           <div style={captionStyle}>SHARE OF PROJECTED REGION OCCUPANCY</div>
@@ -172,8 +202,9 @@ export default function ZoneTelemetry() {
           </ResponsiveContainer>
         </div>
         <div style={{ fontFamily: MONO, fontSize: 9, color: NEO.grey, lineHeight: 1.6, marginTop: 8 }}>
-          Equal image cells cover unequal physical areas. No people-per-square-metre claim is made, and the
-          displayed population is visible eligible tracks rather than total occupancy.
+          Equal image cells cover unequal physical areas. Any persons-per-square-metre figure above belongs
+          to the simulated venue, where the zone area is defined by construction; the backend makes no such
+          claim. The displayed population is visible eligible tracks rather than total occupancy.
         </div>
       </Panel>
     </div>
@@ -218,6 +249,17 @@ const captionStyle = {
   textTransform: 'uppercase',
   letterSpacing: '0.1em',
   marginBottom: 6,
+};
+
+const densityRowStyle = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'flex-end',
+  gap: 10,
+  marginTop: 12,
+  padding: '9px 11px',
+  background: NEO.bg,
+  borderRadius: 2,
 };
 
 const barStyle = {

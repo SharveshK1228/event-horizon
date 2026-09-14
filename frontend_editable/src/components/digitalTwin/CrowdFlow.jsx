@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useVenueStore, selectObservation, isDemo } from '../../store/useVenueStore';
 import { useForecast } from '../../store/derived';
+import { scenarios } from '../../demo';
 import { NEO } from '../../theme';
 
 /**
@@ -99,10 +100,9 @@ export default function CrowdFlow() {
     [],
   );
 
-  const motionState = demo
-    ? { clear: 'OBSERVED MOTION', collective: 'UNUSUAL COLLECTIVE MOVEMENT' }[scenario] ||
-      (scenario === 'tracking' ? 'FLOW AVAILABLE; PERSON MOTION UNAVAILABLE' : 'UNRELIABLE')
-    : observation?.motion_state;
+  // Read the demo scenario's own motion state rather than a second mapping,
+  // so a new scenario cannot silently fall through to UNRELIABLE.
+  const motionState = demo ? scenarios[scenario]?.motion : observation?.motion_state;
 
   const projected = forecast.status !== 'UNAVAILABLE';
   const reversing = motionState === 'UNUSUAL COLLECTIVE MOVEMENT';

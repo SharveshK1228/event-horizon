@@ -1,16 +1,51 @@
 import { create } from 'zustand';
 import { api } from '../api';
-import { scenarios, sampleSop, signalScripts } from '../demo';
-import { simulatedForecast, zoneRows, directionVector } from '../data/venueModel';
+import { scenarios, sampleSop, signalScripts, phaseSignals } from '../demo';
+import {
+  SCENARIO_THRESHOLDS,
+  simulatedForecast,
+  zoneRows,
+  directionVector,
+} from '../data/venueModel';
+import {
+  TIMELINES,
+  formatClock,
+  isTimelineScenario,
+  sampleTimeline,
+  timelineBounds,
+  timelineForecast,
+} from '../data/crowdTimeline';
 
 const POLL_INTERVAL_MS = 2000;
 const STALE_AFTER_MS = 10000;
 const SIGNAL_LIMIT = 12;
-const DEFAULT_THRESHOLD = 10; // matches CrowdForecast(threshold=10)
+const CLOCK_TICK_MS = 200;
+const DEFAULT_THRESHOLD = SCENARIO_THRESHOLDS.clear.threshold;
 
 let pollTimer = null;
 let pollController = null;
 let signalTimers = [];
+let clockTimer = null;
+
+/**
+ * Default concentration threshold and slider bounds for a scenario. Scenarios
+ * differ by an order of magnitude in occupancy, so one fixed range would make
+ * most of them unreadable.
+ * @param {string} scenario
+ * @returns {{threshold:number, range:[number, number]}}
+ */
+export function thresholdConfig(scenario) {
+  if (isTimelineScenario(scenario)) {
+    const timeline = TIMELINES[scenario];
+    return { threshold: timeline.threshold, range: timeline.thresholdRange };
+  }
+  return SCENARIO_THRESHOLDS[scenario] || SCENARIO_THRESHOLDS.clear;
+}
+
+function stopClockTimer() {
+  if (clockTimer) clearInterval(clockTimer);
+  clockTimer = null;
+}
 
 const clock = () => new Date().toLocaleTimeString([], { hour12: false });
 
@@ -48,6 +83,16 @@ export const useVenueStore = create((set, get) => ({
   threshold: DEFAULT_THRESHOLD,
   overlays: { density: true, trajectories: true, flow: true, gates: true, cameras: true },
 
+  // ---- timeline playback -------------------------------------------------
+  // Only meaningful while a timeline scenario is selected; `clockT` is seconds
+  // relative to that timeline's T0.
+  clockT: 0,
+  playing: false,
+  playbackRate: 4,
+  phaseIndex: -1,
+  /** When set, the video's own playhead drives the timeline instead of the clock. */
+  syncVideo: false,
+
   // ---- operator state ----------------------------------------------------
   checks: {},
   acknowledged: false,
@@ -59,6 +104,7 @@ export const useVenueStore = create((set, get) => ({
     if (get().mode === mode) return;
     abortPolling();
     clearSignalTimers();
+    stopClockTimer();
     set({
       mode,
       snapshot: null,
@@ -76,24 +122,135 @@ export const useVenueStore = create((set, get) => ({
     });
     if (mode === 'backend') get().startPolling();
     else get().replayDemoSignals();
+    if (isTimelineScenario(get().scenario)) get().startClock();
   },
 
   setScenario: (scenario) => {
+    stopClockTimer();
+    const timeline = isTimelineScenario(scenario);
+    const { threshold } = thresholdConfig(scenario);
+
     set({
       scenario,
+      threshold,
       selectedZone: null,
       checks: {},
       acknowledged: false,
       answer: null,
       signals: [],
+      clockT: timeline ? timelineBounds(scenario).start : 0,
+      phaseIndex: -1,
+      playing: timeline,
     });
+
+    // The threshold is an operator setting, so a change made on the operator's
+    // behalf is logged rather than applied silently.
+    get().pushSignal(
+      'Operator',
+      `Concentration threshold set to ${threshold} projected tracks for the ${scenario.toUpperCase()} simulation.`,
+      'simulated',
+    );
+
     if (get().mode === 'demo') {
       get().replayDemoSignals();
+      if (timeline) get().startClock();
       return;
     }
     // Backend mode drives the server's own scenario switch; the next poll
     // reports whatever the backend actually returns.
     api.setScenario(scenario).catch((cause) => set({ error: cause.message }));
+    if (timeline) get().startClock();
+  },
+
+  // ---- timeline playback -------------------------------------------------
+
+  /**
+   * Move the timeline clock, emitting one signal-feed line each time playback
+   * crosses into a new phase.
+   * @param {number} clockT seconds relative to the timeline's T0
+   */
+  setClock: (clockT) => {
+    const state = get();
+    if (!isTimelineScenario(state.scenario)) {
+      set({ clockT });
+      return;
+    }
+    const { start, end } = timelineBounds(state.scenario);
+    const bounded = Math.min(end, Math.max(start, clockT));
+    const { phaseIndex, phase } = sampleTimeline(state.scenario, bounded);
+    set({ clockT: bounded });
+
+    if (phaseIndex === state.phaseIndex) return;
+    set({ phaseIndex });
+    const line = phaseSignals[state.scenario]?.[phaseIndex];
+    if (line) {
+      get().pushSignal(line.source, `${formatClock(phase.t)} · ${line.message}`, 'simulated');
+    }
+  },
+
+  startClock: () => {
+    stopClockTimer();
+    if (!isTimelineScenario(get().scenario)) return;
+    clockTimer = setInterval(() => {
+      const { clockT, playbackRate, scenario, playing } = get();
+      if (!playing || !isTimelineScenario(scenario)) return;
+      const { start, end } = timelineBounds(scenario);
+      const next = clockT + (CLOCK_TICK_MS / 1000) * playbackRate;
+      // Loop the rehearsal rather than freezing on the last frame.
+      if (next >= end) {
+        set({ phaseIndex: -1 });
+        get().setClock(start);
+        return;
+      }
+      get().setClock(next);
+    }, CLOCK_TICK_MS);
+  },
+
+  stopClock: () => {
+    stopClockTimer();
+    set({ playing: false });
+  },
+
+  togglePlay: () => {
+    const playing = !get().playing;
+    set({ playing });
+    if (playing) get().startClock();
+    else stopClockTimer();
+  },
+
+  setPlaybackRate: (playbackRate) => set({ playbackRate }),
+
+  /**
+   * Hand the timeline over to the video playhead, or take it back. The two are
+   * mutually exclusive: a running clock and a scrubbing video would fight.
+   */
+  toggleSyncVideo: () => {
+    const syncVideo = !get().syncVideo;
+    set({ syncVideo });
+    if (syncVideo) {
+      stopClockTimer();
+      set({ playing: false });
+      get().pushSignal(
+        'Operator',
+        'Timeline handed to the video playhead. Counts remain simulated; the clip is not being analysed for people.',
+        'simulated',
+      );
+    }
+  },
+
+  /**
+   * Map a position in the clip onto the timeline. The clip's length stands in
+   * for the whole rehearsal, so a short video still plays the full scenario.
+   * @param {number} currentTime seconds into the clip
+   * @param {number} duration clip length in seconds
+   */
+  syncFromVideo: (currentTime, duration) => {
+    const state = get();
+    if (!state.syncVideo || !isTimelineScenario(state.scenario)) return;
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    const { start, end } = timelineBounds(state.scenario);
+    const ratio = Math.min(1, Math.max(0, currentTime / duration));
+    get().setClock(start + ratio * (end - start));
   },
 
   setCameraId: (cameraId) => {
@@ -162,6 +319,7 @@ export const useVenueStore = create((set, get) => ({
   stopPolling: () => {
     abortPolling();
     clearSignalTimers();
+    stopClockTimer();
   },
 
   /** Applies a successful backend read and logs any observation state change. */
@@ -308,7 +466,7 @@ function currentIncident(state) {
 /**
  * The forecast payload driving the 3D zone grid. Prefers a real backend
  * forecast; otherwise returns the simulated grid tagged as such.
- * @param {{mode:string, scenario:string, status:object|null, threshold:number}} slice
+ * @param {{mode:string, scenario:string, status:object|null, threshold:number, clockT:number}} slice
  */
 export function computeForecast(slice) {
   const observation = slice.mode === 'demo' ? null : slice.status?.observation || null;
@@ -316,12 +474,19 @@ export function computeForecast(slice) {
     return { ...observation.forecast, origin: 'observed' };
   }
   const scenario = slice.mode === 'demo' ? slice.scenario : backendScenarioKey(observation);
+  if (isTimelineScenario(scenario)) {
+    return timelineForecast(scenario, slice.clockT, slice.threshold);
+  }
   return simulatedForecast(scenario, slice.threshold);
 }
 
 /** Maps a live observation onto the closest demo scenario for the simulated grid. */
 function backendScenarioKey(observation) {
   if (!observation) return 'tracking';
+  // The backend names its demo source `demo-<scenario>`, so a timeline the
+  // server is running stays a timeline here rather than collapsing to a state.
+  const source = String(observation.source_id || '').replace(/^demo-/, '');
+  if (isTimelineScenario(source)) return source;
   if (observation.visibility_status === 'degraded') return 'visibility';
   if (observation.motion_state === 'CAMERA MOVEMENT SUSPECTED') return 'camera';
   if (observation.tracking_state === 'TRACKING UNAVAILABLE') return 'tracking';
@@ -345,7 +510,7 @@ export function computeMetrics(slice, forecast) {
 
   const rows = demo
     ? [
-        ['Detected heads', scene.count],
+        ['Detected heads', scene.timeline ? timelineHeads(forecast) : scene.count],
         ['Tracking support', scene.tracking],
         ['Visibility', scene.visibility],
         ['Image motion', scene.direction],
@@ -363,4 +528,18 @@ export function computeMetrics(slice, forecast) {
     ...rows.map(([label, value]) => ({ label, value, source })),
     { label: 'Forecast', value: forecast.status, source: forecast.origin },
   ];
+}
+
+/**
+ * Detections implied by a timeline frame: eligible tracks across the analysed
+ * region, divided back out by the track coverage the frame reports. Detections
+ * are always the larger number — a track is a detection that survived.
+ * @param {{cells?: object[], coverage?: number}} forecast
+ * @returns {number|null}
+ */
+function timelineHeads(forecast) {
+  const cells = (forecast.cells || []).filter((cell) => cell.horizon_s === 1);
+  if (!cells.length || !forecast.coverage) return null;
+  const tracks = cells.reduce((total, cell) => total + cell.current_eligible, 0);
+  return Math.round(tracks / forecast.coverage);
 }

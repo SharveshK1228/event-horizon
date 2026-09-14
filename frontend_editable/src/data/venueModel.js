@@ -9,6 +9,37 @@ export const ZONE_SPAN = 12; // world units per zone edge
 export const ZONE_GAP = 2.4; // walkway width between zones
 const PITCH = ZONE_SPAN + ZONE_GAP;
 
+/**
+ * One world unit is one metre in the twin, so a zone tile stands in for this
+ * much floor area. Every persons-per-square-metre figure in the console is
+ * derived from it, and is therefore a property of the *simulated* venue — the
+ * backend reports track counts in image cells and makes no area claim at all.
+ */
+export const ZONE_AREA_M2 = ZONE_SPAN * ZONE_SPAN;
+
+/** Reference density (persons/m²) at which walking speed collapses to a shuffle. */
+export const JAM_DENSITY = 5.4;
+
+/** @param {number|null} count people in one zone @returns {number|null} persons/m² */
+export function densityOf(count) {
+  return count == null || !Number.isFinite(count) ? null : count / ZONE_AREA_M2;
+}
+
+/**
+ * Fraction of free walking speed still available at a given density. A crowd
+ * slows as it packs; past JAM_DENSITY nobody chooses their own pace.
+ * @param {number} density persons/m²
+ * @returns {number} 0..1
+ */
+export function speedFactor(density) {
+  return Math.min(1, Math.max(0.04, 1 - density / JAM_DENSITY));
+}
+
+/** Fraction of tracks below the slow-motion threshold, rising with density. */
+export function slowFractionFor(density) {
+  return Math.round(Math.min(0.97, Math.max(0.05, (density - 0.6) / 3.4)) * 100) / 100;
+}
+
 /** @typedef {{id:string, row:number, col:number, x:number, z:number}} ZoneCell */
 
 /** @type {ZoneCell[]} */
@@ -120,23 +151,33 @@ export function directionVector(value) {
  * enough continuous tracks are eligible. Every other scenario yields
  * UNAVAILABLE with the same reason text the Python baseline would emit.
  */
-// Tuned against the default threshold of 10 projected tracks: `clear` stays
-// below it at every horizon, while `collective` drains the northern zones and
-// concentrates on R3C2, the main exit funnel.
+// Populations are sized for a real venue concourse rather than a handful of
+// markers: a 144 m² zone holding 90–290 people spans roughly 0.6–2.0
+// persons/m², which is the range an occupied plaza actually sits in. `clear`
+// stays below its configured threshold at every horizon, while `collective`
+// drains the northern zones and concentrates on R3C2, the main exit funnel.
 const COUNTS = {
-  clear: [4, 6, 4, 5, 7, 5, 6, 8, 5],
-  collective: [4, 6, 3, 7, 9, 6, 8, 12, 7],
+  clear: [86, 120, 92, 104, 155, 110, 95, 132, 98],
+  collective: [90, 128, 88, 150, 240, 155, 165, 290, 170],
 };
 
 /** Change in eligible tracks per second of projection. */
 const DRIFT = {
-  clear: [1, -1, 0, 1, 0, -1, 0, 0, -1],
-  collective: [-1, -2, -1, 0, 1, 1, 2, 4, 1],
+  clear: [4, -5, 2, 6, -3, -4, 3, 5, -2],
+  collective: [-14, -20, -12, 4, 16, 12, 22, 30, 18],
 };
 
-const SLOW = {
-  clear: [0.12, 0.18, 0.09, 0.21, 0.34, 0.19, 0.28, 0.41, 0.22],
-  collective: [0.08, 0.11, 0.07, 0.36, 0.62, 0.44, 0.51, 0.78, 0.47],
+/**
+ * Default concentration threshold per scenario, in projected tracks, with the
+ * slider bounds that make it adjustable. The threshold is an operator setting;
+ * these are simply the values that make each simulated scenario legible.
+ */
+export const SCENARIO_THRESHOLDS = {
+  clear: { threshold: 300, range: [40, 600] },
+  tracking: { threshold: 300, range: [40, 600] },
+  visibility: { threshold: 300, range: [40, 600] },
+  camera: { threshold: 300, range: [40, 600] },
+  collective: { threshold: 340, range: [40, 600] },
 };
 
 /**
@@ -166,19 +207,20 @@ export function simulatedForecast(scenario, threshold) {
 
   const base = COUNTS[scenario] || COUNTS.clear;
   const drift = DRIFT[scenario] || DRIFT.clear;
-  const slow = SLOW[scenario] || SLOW.clear;
   const cells = [];
 
   for (const horizon of [1, 2, 3]) {
     for (let index = 0; index < base.length; index += 1) {
       const projected = Math.max(0, base[index] + drift[index] * horizon);
+      const density = projected / ZONE_AREA_M2;
       cells.push({
         cell: ZONE_IDS[index],
         horizon_s: horizon,
         current_eligible: base[index],
         projected_tracks: projected,
         change: projected - base[index],
-        slow_fraction: slow[index],
+        slow_fraction: slowFractionFor(density),
+        density_per_m2: Math.round(density * 100) / 100,
         concentration_flag: projected >= threshold,
       });
     }
@@ -231,6 +273,11 @@ export function zoneRows(forecast, horizon, threshold) {
       projected,
       change: cell ? cell.change : null,
       slowFraction: cell ? cell.slow_fraction : null,
+      // Present only for simulated grids, where the zone's floor area is known.
+      // A backend forecast counts tracks in image cells and supplies no area,
+      // so both of these stay null rather than inventing one.
+      density: cell?.density_per_m2 ?? null,
+      currentDensity: cell?.density_per_m2 == null ? null : densityOf(cell.current_eligible),
       flagged: Boolean(cell?.concentration_flag),
       ratio: projected == null || threshold <= 0 ? null : projected / threshold,
     };

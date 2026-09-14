@@ -34,7 +34,9 @@ system claims that a crowd is safe.
   - [The 3D digital twin](#the-3d-digital-twin)
   - [Zone telemetry](#zone-telemetry)
   - [The five evidence states](#the-five-evidence-states)
+  - [Crowd timelines: congestion and crush](#crowd-timelines-congestion-and-crush)
   - [Backend mode](#backend-mode)
+  - [Playing a real clip beside the twin](#playing-a-real-clip-beside-the-twin)
   - [Incident response and SOPs](#incident-response-and-sops)
   - [The operator assistant](#the-operator-assistant)
   - [The integration API](#the-integration-api)
@@ -152,6 +154,47 @@ track motion and net flow. Three zones cross the threshold and the console asks 
 </tr>
 </table>
 
+### Crowd timelines: congestion and crush
+
+The five states above each hold one moment. Two further scenarios — **egress surge** and
+**crush conditions** — play out over several minutes instead, so an operator can rehearse
+the shape of a concourse filling up rather than only the shape of one alarm.
+
+Both are authored simulations. They are not recordings of any real incident, not model
+output, and not predictions. What they are for is the one question a crowd-safety tool
+has to answer: *how long before the condition does the projection actually tell you?*
+
+| | Egress surge | Crush conditions |
+| --- | --- | --- |
+| Story | end-of-event egress; arrivals at the main exit funnel exceed gate throughput | the same egress with two of six gates lost partway through |
+| Runs | T−05:00 → T+03:00 | T−05:00 → T+02:00 |
+| Peak at the funnel | ~3.3 persons/m² — congested | ~5.2 persons/m² — the band crowd-collapse incidents are documented at |
+| Default threshold | 240 projected tracks (≈1.7 /m²) | 300 projected tracks (≈2.1 /m²) |
+| Warning at +2 s | crosses at T−02:18, congestion at T−01:36 → **42 s** | crosses at T−01:44, crush-risk density at T−00:45 → **59 s** |
+
+The timeline panel in the console carries a transport (play/pause, 1×/4×/10×), a scrubber
+with one tick per authored phase, the running phase note, and that lead-time sentence
+written out in full — including the cases where it goes wrong. Raise the threshold far
+enough and the panel says *no usable warning*, because the projection then crosses only
+after the crowd has already arrived at the dangerous density. That failure is worth being
+able to see.
+
+**What the timelines drive.** One set of keyframes feeds everything: per-zone populations
+are interpolated to the playback clock, the per-second rate between keyframes is what the
+constant-velocity projection extrapolates to +1/+2/+3 s, slow fraction follows density,
+and track coverage *falls* as the crowd packs — heads occlude one another, so a crush is
+the worst moment to trust a count. The crowd markers in the twin obey the same numbers:
+walking speed drops toward a shuffle as density rises, lateral jostle grows, the mass
+compresses against the edge it is trying to leave through, and a share of it turns back
+into the people behind it as counterflow appears.
+
+**Density bands.** Where the twin reports persons/m², it is people divided by the 144 m²
+a zone tile stands for *in the simulated venue* — an area defined by construction, not
+measured. The band boundaries (free flow, restricted, congested, crush risk, critical)
+are the reference levels used in published crowd-safety practice, not thresholds this
+project has validated. No persons-per-square-metre figure is shown in backend mode,
+because the backend counts tracks in image cells and supplies no area at all.
+
 ### Backend mode
 
 ![Backend mode](docs/screenshots/09-backend-mode.png)
@@ -164,6 +207,41 @@ and the selected camera's status every two seconds. The header pill goes
 
 Backend mode never silently falls back to demo data. A failed read shows
 **DISCONNECTED**; an observation older than ten seconds shows **STALE**.
+
+### Playing a real clip beside the twin
+
+The camera panel plays a video -- a bundled sample, one uploaded to the API, or a purely
+local file -- and runs the project's **visibility check** over it live, in the browser.
+
+That check is the one part of the pipeline that needs no model, so it is genuinely observed
+rather than simulated. [`videoSignals.js`](frontend_editable/src/lib/videoSignals.js) is a
+direct port of the Python: the same per-tile feature triple as `dashboard_worker.py`
+(standard deviation, variance of the Laplacian, fraction of clipped pixels) and the same
+reference rule as `crowd_signals.QualityReference` -- median reference from the first three
+seconds and ten samples, a tile counted as changed at 30 % of its reference, degraded at two
+changed tiles. The overlay marks each tile with the venue's own zone name, so clicking a tile
+in the video selects that zone in the twin.
+
+Alongside it the panel shows a **frame difference** per tile: absolute pixel change between
+samples. Camera shake and lighting changes register there too, which is exactly why it is
+labelled pixel change and never person motion.
+
+What the panel deliberately does **not** draw is head boxes or tracks, because none were
+computed. There is no detector in this application. A real crowd video playing next to a
+filling twin is the most tempting place in the whole project to imply otherwise, so the stage
+is stamped `NO DETECTOR RUNNING - IMAGE CHECKS ONLY` and every crowd count beside it keeps
+its `SIMULATED` tag.
+
+The clip can also drive the rehearsal: tick *drive the simulated crowd timeline from this
+clip's playhead* and scrubbing the video scrubs the surge or crush timeline with it, so the
+zone grid, densities and lead time move against real footage. The counts remain the authored
+timeline -- the video is the thing you are watching, not the thing being measured.
+
+| Route | Where clips come from |
+| --- | --- |
+| Bundled | `<repo>/sample crowd videos` -- served by the API, or by the dev server at `/samples` when the API is not running |
+| Uploaded | `POST /api/sources`, stored in `backend/api/uploads` (gitignored), 200 MB limit |
+| Local file | never leaves the browser; analysed the same way |
 
 ### Incident response and SOPs
 
@@ -338,7 +416,9 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/demo/scenario `
   -ContentType application/json -Body '{"scenario":"collective"}'
 ```
 
-Allowed scenarios: `clear`, `tracking`, `visibility`, `camera`, `collective`.
+Allowed scenarios: `clear`, `tracking`, `visibility`, `camera`, `collective`, `surge`,
+`crush`. The last two are the timeline scenarios; the API reports their headline evidence
+state, while the console plays the timeline itself and recognises them by `source_id`.
 
 `npm run build` produces `dist/`; serve it behind a reverse proxy that routes `/api` to
 the Python API. `vite preview` does **not** supply the API.
@@ -406,6 +486,11 @@ Base URL `http://127.0.0.1:8000`. Interactive docs at `/docs`.
 | `GET` | `/api/sops/{sop_id}` | sample SOP: reactive, proactive, escalation, recovery |
 | `POST` | `/api/incidents/{incident_id}/acknowledge` | memory-only acknowledgement + operator note |
 | `POST` | `/api/demo/scenario` | switch the demonstration evidence state |
+| `GET` | `/api/sources` | list bundled and uploaded demo clips |
+| `POST` | `/api/sources` | store a clip sent as the raw body, named by `X-Filename` |
+| `GET` | `/api/sources/{id}/video` | stream a clip, with `Range` support |
+| `DELETE` | `/api/sources/{id}` | remove an uploaded clip |
+| `GET` | `/api/assistant/config` | which assistant backend is active; never returns a key |
 | `POST` | `/api/assistant` | evidence-bounded answer; `response_origin` is `llm` or `scripted_fallback` |
 
 Every observation carries `data_origin` (`demo` today), `received_at`,
@@ -456,7 +541,10 @@ illustrative count threshold was exceeded in this projection.*
 
 - Not a trained congestion or surge classifier
 - Not a probability of a dangerous event
-- Not a people-per-square-metre estimate — equal image cells cover unequal physical areas
+- Not a people-per-square-metre estimate — equal image cells cover unequal physical
+  areas, and the API reports no area at all. The persons/m² figures in the simulated
+  crowd timelines come from the twin's own invented geometry and say nothing about any
+  real venue
 - Not a total site population — displayed counts are visible detections
 - Not evidence of route safety; the model infers no forces, no pressure and no intent
 

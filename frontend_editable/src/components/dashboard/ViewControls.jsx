@@ -1,6 +1,8 @@
-import { useVenueStore, isDemo } from '../../store/useVenueStore';
+import { useVenueStore, isDemo, thresholdConfig } from '../../store/useVenueStore';
 import { useForecast } from '../../store/derived';
-import { NEO, MONO, HARD } from '../../theme';
+import { ZONE_AREA_M2 } from '../../data/venueModel';
+import OverlayPanel from '../digitalTwin/OverlayPanel';
+import { NEO, MONO, densityBand } from '../../theme';
 
 const HORIZONS = [1, 2, 3];
 
@@ -11,9 +13,6 @@ const OVERLAYS = [
   { key: 'gates', label: 'EGRESS', color: NEO.green },
   { key: 'cameras', label: 'CAMERAS', color: NEO.red },
 ];
-
-const THRESHOLD_MIN = 4;
-const THRESHOLD_MAX = 30;
 
 /**
  * Floating controls over the twin: which projection horizon to render, the
@@ -28,17 +27,30 @@ export default function ViewControls() {
   const setHorizon = useVenueStore((state) => state.setHorizon);
   const setThreshold = useVenueStore((state) => state.setThreshold);
   const toggleOverlay = useVenueStore((state) => state.toggleOverlay);
+  const scenario = useVenueStore((state) => state.scenario);
   const forecast = useForecast();
 
   const available = forecast.status !== 'UNAVAILABLE';
+  // Scenarios differ by an order of magnitude in occupancy, so the slider
+  // rescales with the one selected rather than pinning a single fixed range.
+  const [thresholdMin, thresholdMax] = thresholdConfig(scenario).range;
+  const filled = ((threshold - thresholdMin) / (thresholdMax - thresholdMin)) * 100;
+  const band = densityBand(threshold / ZONE_AREA_M2);
 
   return (
-    <div style={shellStyle}>
-      <div style={titleStyle}>
-        <span style={{ color: NEO.orange }}>◎</span>
-        TWIN CONTROLS
-      </div>
-
+    <OverlayPanel
+      title="Twin controls"
+      width={218}
+      // Projection state stays visible in the bar, so minimising the panel
+      // never hides whether a projection is running.
+      badge={
+        <span
+          style={{ width: 7, height: 7, borderRadius: '50%', background: available ? NEO.green : NEO.grey }}
+          title={available ? 'Projection on' : 'No projection'}
+        />
+      }
+    >
+      <div style={bodyStyle}>
       {/* Projection horizon */}
       <div style={{ marginBottom: '12px' }}>
         <div style={captionStyle}>PROJECTION HORIZON</div>
@@ -74,8 +86,9 @@ export default function ViewControls() {
         </div>
         <input
           type="range"
-          min={THRESHOLD_MIN}
-          max={THRESHOLD_MAX}
+          min={thresholdMin}
+          max={thresholdMax}
+          step={thresholdMax > 200 ? 10 : 1}
           value={threshold}
           onChange={(event) => setThreshold(Number(event.target.value))}
           aria-label="Concentration threshold in projected tracks"
@@ -83,17 +96,26 @@ export default function ViewControls() {
             width: '100%',
             height: '6px',
             appearance: 'none',
-            background: `linear-gradient(to right, ${NEO.orange} 0%, ${NEO.orange} ${
-              ((threshold - THRESHOLD_MIN) / (THRESHOLD_MAX - THRESHOLD_MIN)) * 100
-            }%, ${NEO.bg} ${((threshold - THRESHOLD_MIN) / (THRESHOLD_MAX - THRESHOLD_MIN)) * 100}%, ${NEO.bg} 100%)`,
+            background: `linear-gradient(to right, ${NEO.orange} 0%, ${NEO.orange} ${filled}%, ${NEO.bg} ${filled}%, ${NEO.bg} 100%)`,
             border: `1px solid ${NEO.ink}`,
             outline: 'none',
             cursor: 'pointer',
             borderRadius: '10px',
           }}
         />
-        <div style={{ fontSize: '8px', color: NEO.grey, marginTop: '4px', lineHeight: 1.4 }}>
-          Illustrative count threshold, not a risk probability.
+        <div style={{ fontSize: '8px', color: NEO.grey, marginTop: '4px', lineHeight: 1.5 }}>
+          {demo ? (
+            <>
+              ≈{' '}
+              <span style={{ color: band.color, fontWeight: 900 }}>
+                {(threshold / ZONE_AREA_M2).toFixed(2)} /m²
+              </span>{' '}
+              over a simulated {ZONE_AREA_M2} m² zone. Illustrative count threshold, not a risk
+              probability.
+            </>
+          ) : (
+            'Illustrative count threshold, not a risk probability.'
+          )}
         </div>
       </div>
 
@@ -142,34 +164,12 @@ export default function ViewControls() {
           {demo ? 'DEMO DATA' : 'BACKEND MODE'} · {available ? 'PROJECTION ON' : 'NO PROJECTION'}
         </span>
       </div>
-    </div>
+      </div>
+    </OverlayPanel>
   );
 }
 
-const shellStyle = {
-  background: NEO.surface,
-  border: HARD.border,
-  boxShadow: HARD.shadow,
-  padding: '12px',
-  width: '218px',
-  borderRadius: '10px',
-  fontFamily: MONO,
-  pointerEvents: 'auto',
-  color: NEO.ink,
-};
-
-const titleStyle = {
-  fontSize: '10px',
-  fontWeight: 'bold',
-  letterSpacing: '0.12em',
-  textTransform: 'uppercase',
-  marginBottom: '12px',
-  borderBottom: `2px solid ${NEO.ink}`,
-  paddingBottom: '6px',
-  display: 'flex',
-  alignItems: 'center',
-  gap: '6px',
-};
+const bodyStyle = { padding: '12px', fontFamily: MONO, color: NEO.ink };
 
 const captionStyle = {
   fontSize: '8px',

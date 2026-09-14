@@ -1,20 +1,37 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useVenueStore, selectObservation, selectStale, isDemo } from '../../store/useVenueStore';
 import { useMetrics } from '../../store/derived';
+import useVideoAnalysis from '../../hooks/useVideoAnalysis';
+import { CHANGED_TILES } from '../../lib/videoSignals';
+import { isTimelineScenario } from '../../data/crowdTimeline';
 import { Panel, StatCard, ProvenanceTag } from './primitives';
+import SourcePicker from './SourcePicker';
+import VideoStage from './VideoStage';
 import { NEO, MONO } from '../../theme';
 
-const OVERLAY_NAMES = ['Detections', 'Trajectories', 'Optical flow', 'Zones', 'Forecasts'];
-
 const METRIC_MAX = {
-  'Detected heads': 400,
+  'Detected heads': 3000,
   'Processing FPS': 30,
 };
 
+const QUALITY_TONE = {
+  'REFERENCE-LIKE': NEO.green,
+  DEGRADED: NEO.red,
+  'WARMING UP': NEO.amber,
+  UNAVAILABLE: NEO.grey,
+  'NO VIDEO': NEO.grey,
+};
+
 /**
- * Camera observation: local video preview plus the six headline metrics.
- * Local preview never starts analysis, and the overlay toggles stay disabled
- * until synchronised overlay data exists.
+ * Camera observation: the video, the checks that genuinely run over it, and
+ * the six headline metrics.
+ *
+ * The panel holds two kinds of number at once and must never let them blur.
+ * The per-tile image checks are **observed** — they are computed in this
+ * browser from these frames, using the same definitions as the Python
+ * pipeline. The crowd counts beside them are **simulated**, because no
+ * detector or tracker exists in this application. Loading a real crowd video
+ * does not change that, and the panel states it wherever the video appears.
  */
 export default function CameraPanel() {
   const demo = useVenueStore(isDemo);
@@ -25,21 +42,27 @@ export default function CameraPanel() {
   const cameraId = useVenueStore((state) => state.cameraId);
   const setCameraId = useVenueStore((state) => state.setCameraId);
   const status = useVenueStore((state) => state.status);
+  const scenario = useVenueStore((state) => state.scenario);
+  const selectedZone = useVenueStore((state) => state.selectedZone);
+  const setSelectedZone = useVenueStore((state) => state.setSelectedZone);
+  const syncVideo = useVenueStore((state) => state.syncVideo);
+  const toggleSyncVideo = useVenueStore((state) => state.toggleSyncVideo);
+  const syncFromVideo = useVenueStore((state) => state.syncFromVideo);
 
-  const [file, setFile] = useState(null);
-  const [fileUrl, setFileUrl] = useState('');
+  const videoRef = useRef(null);
+  const [source, setSource] = useState(null);
+  const reading = useVideoAnalysis(videoRef, source?.id || null);
 
+  // Revoke object URLs for local files so the blob is not retained.
   useEffect(() => {
-    if (!file) {
-      setFileUrl('');
-      return undefined;
-    }
-    const url = URL.createObjectURL(file);
-    setFileUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
+    const url = source?.origin === 'local' ? source.url : null;
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [source]);
 
   const tone = demo ? 'simulated' : stale ? 'missing' : 'observed';
+  const qualityColor = QUALITY_TONE[reading.status] || NEO.grey;
 
   return (
     <Panel
@@ -76,58 +99,76 @@ export default function CameraPanel() {
         </ProvenanceTag>
       </div>
 
-      {/* Video stage */}
-      <div style={stageStyle}>
-        {fileUrl ? (
-          <video src={fileUrl} controls style={{ width: '100%', maxHeight: 300, background: '#000' }} />
-        ) : (
-          <div style={{ textAlign: 'center', padding: 24 }}>
-            <div style={{ fontSize: 44, color: '#648b99', fontWeight: 200, lineHeight: 1 }}>⊕</div>
-            <h3 style={{ fontFamily: MONO, fontSize: 12, margin: '12px 0 6px', color: NEO.ink }}>
-              {demo ? 'Camera preview' : 'Awaiting connected video'}
-            </h3>
-            <p style={{ fontFamily: MONO, fontSize: 9, color: NEO.grey, margin: 0 }}>
-              Choose a video to preview locally.
-            </p>
+      <SourcePicker selected={source} onSelect={setSource} />
+
+      <VideoStage
+        videoRef={videoRef}
+        src={source?.url || ''}
+        reading={reading}
+        selectedZone={selectedZone}
+        onSelectZone={setSelectedZone}
+        onTimeUpdate={(event) =>
+          syncFromVideo(event.currentTarget.currentTime, event.currentTarget.duration)
+        }
+      />
+
+      {/* What the browser actually measured on these frames */}
+      {source && (
+        <div style={observedBoxStyle}>
+          <div style={observedHeadStyle}>
+            <span>▸ IMAGE CHECKS ON THIS CLIP</span>
+            <ProvenanceTag tone="observed">OBSERVED IN BROWSER</ProvenanceTag>
           </div>
-        )}
-        <span style={cornerStyle}>CAM · {fileUrl ? 'LOCAL PREVIEW' : 'NO STREAM'}</span>
-      </div>
 
-      <div style={controlsRowStyle}>
-        <label style={fileButtonStyle}>
-          Choose video
-          <input
-            type="file"
-            accept="video/*"
-            style={{ display: 'none' }}
-            onChange={(event) => setFile(event.target.files?.[0] || null)}
-          />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            <StatCard
+              label="Visibility reference"
+              value={reading.status === 'WARMING UP' ? `${Math.round(reading.progress * 100)}%` : reading.status}
+              color={qualityColor}
+              max={100}
+              note={reading.status === 'WARMING UP' ? 'BUILDING FROM FIRST 3 s' : 'RELATIVE TO REFERENCE'}
+            />
+            <StatCard
+              label="Changed tiles"
+              value={reading.status === 'WARMING UP' ? null : `${reading.changed}/9`}
+              color={reading.changed >= CHANGED_TILES ? NEO.red : NEO.green}
+              max={9}
+              note={`DEGRADED AT ${CHANGED_TILES}`}
+            />
+            <StatCard
+              label="Frame difference"
+              value={reading.motion.length ? mean(reading.motion).toFixed(1) : null}
+              color={NEO.violet}
+              max={24}
+              note="PIXEL CHANGE, NOT PERSON MOTION"
+            />
+          </div>
+
+          <p style={observedNoteStyle}>
+            Contrast, sharpness and clipped-pixel fraction per tile, compared against a median
+            reference built from the first three seconds — the same definitions{' '}
+            <code style={codeStyle}>crowd_signals.QualityReference</code> uses. Frame difference is
+            absolute pixel change between samples: camera shake and lighting register here too, so
+            it is never reported as person motion.{' '}
+            <strong style={{ color: NEO.ink }}>
+              No detector or tracker runs on this clip, so no count below comes from it.
+            </strong>
+          </p>
+        </div>
+      )}
+
+      {/* Timeline handover */}
+      {source && (
+        <label style={syncRowStyle}>
+          <input type="checkbox" checked={syncVideo} onChange={toggleSyncVideo} />
+          <span>
+            Drive the simulated crowd timeline from this clip's playhead
+            {!isTimelineScenario(scenario) && (
+              <em style={{ color: NEO.grey }}> — select a crowd timeline scenario to use this</em>
+            )}
+          </span>
         </label>
-        {file && (
-          <button type="button" onClick={() => setFile(null)} style={clearStyle}>
-            Clear
-          </button>
-        )}
-        <span style={{ fontFamily: MONO, fontSize: 9, color: NEO.grey, overflowWrap: 'anywhere' }}>
-          {file ? file.name : 'Local preview does not start analysis'}
-        </span>
-      </div>
-
-      {/* Overlay toggles — still unconnected to synchronized data */}
-      <div style={overlayRowStyle}>
-        {OVERLAY_NAMES.map((name) => (
-          <label
-            key={name}
-            title="Requires synchronized backend overlay data"
-            style={{ display: 'flex', alignItems: 'center', gap: 4, color: NEO.grey }}
-          >
-            <input type="checkbox" disabled />
-            {name}
-          </label>
-        ))}
-        <small style={{ color: NEO.grey }}>Video overlays not connected</small>
-      </div>
+      )}
 
       {/* Headline metrics */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 14 }}>
@@ -145,10 +186,16 @@ export default function CameraPanel() {
 
       <div style={timestampStyle}>
         Observation time: {observation?.received_at || (demo ? 'Simulated — no capture time' : 'Unavailable')}
+        {reading.sampledAt != null && ` · clip position ${reading.sampledAt.toFixed(1)} s`}
       </div>
     </Panel>
   );
 }
+
+function mean(values) {
+  return values.reduce((total, value) => total + value, 0) / (values.length || 1);
+}
+
 
 const selectorRowStyle = {
   display: 'flex',
@@ -169,59 +216,53 @@ const selectStyle = {
   color: NEO.ink,
 };
 
-const stageStyle = {
-  position: 'relative',
-  aspectRatio: '16 / 9',
-  background: 'radial-gradient(ellipse at center, #dfe4e7, #c9ced2)',
-  border: `2px solid ${NEO.ink}`,
-  display: 'grid',
-  placeItems: 'center',
-  overflow: 'hidden',
+const observedBoxStyle = {
+  marginTop: 12,
+  padding: 10,
+  border: `2px solid ${NEO.green}`,
+  borderRadius: 3,
+  background: '#F6FFF9',
 };
 
-const cornerStyle = {
-  position: 'absolute',
-  top: 10,
-  left: 10,
-  fontFamily: MONO,
-  fontSize: 9,
-  fontWeight: 'bold',
-  color: NEO.surface,
-  background: NEO.ink,
-  padding: '4px 7px',
-};
-
-const controlsRowStyle = {
+const observedHeadStyle = {
   display: 'flex',
+  justifyContent: 'space-between',
   alignItems: 'center',
-  gap: 10,
+  gap: 8,
   flexWrap: 'wrap',
-  marginTop: 10,
-};
-
-const fileButtonStyle = {
-  border: `2px solid ${NEO.ink}`,
-  background: NEO.surface,
-  color: NEO.ink,
+  marginBottom: 8,
   fontFamily: MONO,
-  fontSize: 10,
-  fontWeight: 'bold',
-  padding: '6px 10px',
-  cursor: 'pointer',
-  boxShadow: `2px 2px 0px 0px ${NEO.ink}`,
+  fontSize: 9,
+  fontWeight: 900,
+  letterSpacing: '0.1em',
+  color: NEO.grey,
 };
 
-const clearStyle = { ...fileButtonStyle, boxShadow: 'none' };
+const observedNoteStyle = {
+  fontFamily: MONO,
+  fontSize: 8,
+  lineHeight: 1.8,
+  color: NEO.grey,
+  margin: '9px 0 0',
+};
 
-const overlayRowStyle = {
+const codeStyle = {
+  background: NEO.bg,
+  padding: '1px 3px',
+  borderRadius: 2,
+  fontSize: 8,
+};
+
+const syncRowStyle = {
   display: 'flex',
-  gap: 12,
-  flexWrap: 'wrap',
-  borderTop: `1px solid ${NEO.line}`,
-  paddingTop: 10,
+  alignItems: 'flex-start',
+  gap: 7,
   marginTop: 10,
   fontFamily: MONO,
   fontSize: 9,
+  lineHeight: 1.6,
+  color: NEO.ink,
+  cursor: 'pointer',
 };
 
 const timestampStyle = {

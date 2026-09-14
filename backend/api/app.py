@@ -8,27 +8,39 @@ from __future__ import annotations
 import json
 import os
 import threading
-import urllib.error
-import urllib.request
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
+import llm_providers
 from incident_engine import make_incident
+from video_sources import MAX_UPLOAD_BYTES, VideoLibrary
 
 
 BASE = Path(__file__).resolve().parent
-load_dotenv(BASE / ".env")
+REPO_ROOT = BASE.parents[1]
+# The repository-root .env is where keys usually live; the API-local one wins
+# where both define the same name. Neither is committed.
+load_dotenv(REPO_ROOT / ".env")
+load_dotenv(BASE / ".env", override=True)
 SOPS = json.loads((BASE / "sops.json").read_text(encoding="utf-8"))
+
+# Clips the console can play. The bundled folder ships with the repository
+# checkout; uploads land beside the API and are gitignored.
+videos = VideoLibrary(
+    bundled_dir=Path(os.getenv("EH_SAMPLE_VIDEOS", REPO_ROOT / "sample crowd videos")),
+    upload_dir=Path(os.getenv("EH_UPLOAD_DIR", BASE / "uploads")),
+)
 
 SCENARIOS: dict[str, dict[str, Any]] = {
     "clear": {
-        "detected_heads": 214,
+        "detected_heads": 1210,
         "tracking_state": "TRACK MOTION AVAILABLE",
         "tracking_reliability": 0.82,
         "visibility_status": "reference-like",
@@ -64,13 +76,35 @@ SCENARIOS: dict[str, dict[str, Any]] = {
         "processing_fps": 13.2,
     },
     "collective": {
-        "detected_heads": 238,
+        "detected_heads": 1942,
         "tracking_state": "TRACK MOTION AVAILABLE",
         "tracking_reliability": 0.76,
         "visibility_status": "reference-like",
         "dominant_direction": "rapid reversal — image space",
         "motion_state": "UNUSUAL COLLECTIVE MOVEMENT",
         "processing_fps": 9.8,
+    },
+    # The two scenarios below are the fixed headline state of a timed egress
+    # simulation. The console plays the timeline itself and recognises them by
+    # source_id; the API reports only the evidence state, as it does for the
+    # rest. Neither is a replay of a real incident.
+    "surge": {
+        "detected_heads": 2210,
+        "tracking_state": "TRACK MOTION AVAILABLE",
+        "tracking_reliability": 0.71,
+        "visibility_status": "reference-like",
+        "dominant_direction": "south — image space",
+        "motion_state": "OBSERVED MOTION",
+        "processing_fps": 17.2,
+    },
+    "crush": {
+        "detected_heads": 2680,
+        "tracking_state": "TRACK MOTION AVAILABLE",
+        "tracking_reliability": 0.58,
+        "visibility_status": "reference-like",
+        "dominant_direction": "south with counterflow — image space",
+        "motion_state": "UNUSUAL COLLECTIVE MOVEMENT",
+        "processing_fps": 11.6,
     },
 }
 
@@ -82,7 +116,9 @@ if runtime["scenario"] not in SCENARIOS:
 
 
 class ScenarioRequest(BaseModel):
-    scenario: Literal["clear", "tracking", "visibility", "camera", "collective"]
+    scenario: Literal[
+        "clear", "tracking", "visibility", "camera", "collective", "surge", "crush"
+    ]
 
 
 class AcknowledgeRequest(BaseModel):
@@ -119,6 +155,8 @@ def observation() -> dict[str, Any]:
             "Demo evidence; no live video analysis is connected.",
             "Detected heads are not verified site occupancy.",
             "No validated surge probability is available.",
+            "Crowd density figures shown by the console belong to its simulated "
+            "venue geometry. This API reports no persons-per-square-metre value.",
         ],
     )
     return value
@@ -222,43 +260,66 @@ def scripted_answer(request: AssistantRequest, incident: dict[str, Any] | None) 
     )
 
 
-def call_optional_llm(request: AssistantRequest, incident: dict[str, Any], sop: dict[str, Any]) -> str | None:
-    """Optional server-side OpenAI Responses call; failure returns None for safe fallback."""
-    key = os.getenv("OPENAI_API_KEY")
-    if not key:
-        return None
-    prompt = {
-        "role": "You explain only the supplied Event Horizon evidence and sample SOP. Do not invent routes, counts, probabilities, actions, contacts or approvals. State uncertainty and require authorized human decisions.",
-        "question": request.question,
-        "incident": incident,
-        "sop": sop,
+@app.get("/api/sources")
+def list_sources() -> dict[str, Any]:
+    """Clips available for playback. Listing a clip starts no analysis."""
+    return {
+        "sources": videos.list(),
+        "max_upload_bytes": MAX_UPLOAD_BYTES,
+        "analysis": "none",
+        "note": (
+            "Playback only. No detector or tracker runs over these frames in this process, "
+            "and crowd counts shown beside a clip remain simulated."
+        ),
     }
-    body = json.dumps(
-        {
-            "model": os.getenv("OPENAI_MODEL", "gpt-5-mini"),
-            "input": json.dumps(prompt),
-            "max_output_tokens": 450,
-        }
-    ).encode("utf-8")
-    call = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=body,
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        method="POST",
-    )
+
+
+@app.post("/api/sources")
+async def upload_source(request: Request) -> dict[str, Any]:
+    """Accept a clip as a raw request body, named by the `X-Filename` header.
+
+    Raw bytes rather than multipart keeps the API dependency-free; the browser
+    sends the File object directly as the body.
+    """
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"Video exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.")
+
+    payload = await request.body()
     try:
-        with urllib.request.urlopen(call, timeout=8) as response:
-            data = json.load(response)
-        if isinstance(data.get("output_text"), str):
-            return data["output_text"].strip()
-        parts = []
-        for item in data.get("output", []):
-            for content in item.get("content", []):
-                if content.get("type") == "output_text" and isinstance(content.get("text"), str):
-                    parts.append(content["text"])
-        return "\n".join(parts).strip() or None
-    except (urllib.error.URLError, TimeoutError, ValueError, KeyError):
-        return None
+        source = videos.save(request.headers.get("X-Filename", ""), payload)
+    except ValueError as cause:
+        raise HTTPException(400, str(cause)) from cause
+    return {"source": source, "analysis": "none", "received_at": now()}
+
+
+@app.get("/api/sources/{source_id}/video")
+def read_source(source_id: str) -> FileResponse:
+    resolved = videos.resolve(source_id)
+    if resolved is None:
+        raise HTTPException(404, "Unknown video source")
+    path, source = resolved
+    # FileResponse honours Range requests, so the browser can seek in a clip
+    # without downloading all of it first. The disposition stays `inline` so a
+    # <video> element plays the clip instead of the browser downloading it.
+    return FileResponse(
+        path,
+        media_type=source.media_type,
+        headers={"Content-Disposition": "inline"},
+    )
+
+
+@app.delete("/api/sources/{source_id}")
+def delete_source(source_id: str) -> dict[str, Any]:
+    if not videos.delete(source_id):
+        raise HTTPException(404, "No uploaded video with that id")
+    return {"source_id": source_id, "deleted": True, "deleted_at": now()}
+
+
+@app.get("/api/assistant/config")
+def assistant_config() -> dict[str, Any]:
+    """Which assistant backend is configured. Never returns a key."""
+    return llm_providers.describe()
 
 
 @app.post("/api/assistant")
@@ -268,9 +329,12 @@ def assistant(request: AssistantRequest) -> dict[str, Any]:
     if request.incident_id and incident is None:
         raise HTTPException(404, "Current incident not found")
     sop = SOPS[incident["sop_id"]] if incident else None
-    llm_text = call_optional_llm(request, incident, sop) if incident and sop else None
+    generated = (
+        llm_providers.generate(request.question, incident, sop) if incident and sop else None
+    )
+    llm_text, origin = generated if generated else (None, "scripted_fallback")
     return {
-        "response_origin": "llm" if llm_text else "scripted_fallback",
+        "response_origin": origin,
         "text": llm_text or scripted_answer(request, incident),
         "incident_id": incident["incident_id"] if incident else None,
         "observation_timestamp": incident["latest_update"] if incident else None,

@@ -11,7 +11,8 @@ import CrowdFlow from './CrowdFlow';
 import SceneEffects from './SceneEffects';
 import SignalOverlay from './SignalOverlay';
 import ViewControls from '../dashboard/ViewControls';
-import { NEO, MONO, HARD } from '../../theme';
+import OverlayPanel from './OverlayPanel';
+import { NEO, MONO, HARD, DENSITY_BANDS } from '../../theme';
 
 const LEGEND = [
   { color: NEO.green, label: 'SPARSE' },
@@ -93,24 +94,51 @@ export default function VenueScene() {
         />
       </Canvas>
 
-      {/* Legend */}
-      <div style={legendStyle}>
-        <div style={{ marginBottom: 5 }}>ZONE DENSITY @ +{horizon}s</div>
-        {LEGEND.map((entry) => (
-          <div key={entry.label} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
-            <span style={{ width: 9, height: 9, background: entry.color, border: `1px solid ${NEO.ink}` }} />
-            {entry.label}
+      {/* Legend and provenance banner share one column so neither can cover
+          the other as the legend grows. */}
+      <div style={rightColumnStyle}>
+        <OverlayPanel
+          title={`Legend @ +${horizon}s`}
+          badge={
+            <span style={{ display: 'flex', gap: 3 }}>
+              {LEGEND.slice(0, 4).map((entry) => (
+                <span key={entry.label} style={{ ...swatchStyle, width: 7, height: 7, background: entry.color }} />
+              ))}
+            </span>
+          }
+        >
+          <div style={legendBodyStyle}>
+            <div style={legendCaptionStyle}>COLUMN · SHARE OF THRESHOLD</div>
+            {LEGEND.map((entry) => (
+              <div key={entry.label} style={legendRowStyle}>
+                <span style={{ ...swatchStyle, background: entry.color }} />
+                {entry.label}
+              </div>
+            ))}
+            {demo && (
+              <>
+                <div style={{ ...legendCaptionStyle, marginTop: 8, borderTop: `1px solid ${NEO.line}`, paddingTop: 6 }}>
+                  CROWD · PERSONS/m² (SIMULATED)
+                </div>
+                {DENSITY_BANDS.map((band) => (
+                  <div key={band.key} style={legendRowStyle}>
+                    <span style={{ ...swatchStyle, background: band.color }} />
+                    {band.label}
+                  </div>
+                ))}
+              </>
+            )}
           </div>
-        ))}
-      </div>
+        </OverlayPanel>
 
-      {/* Provenance banner — the grid must never be mistaken for model output */}
-      <div style={{ ...bannerStyle, borderColor: simulatedGrid ? NEO.amber : NEO.green }}>
-        <strong style={{ color: simulatedGrid ? '#92400E' : '#14532D' }}>
-          {simulatedGrid ? '⚠ ZONE GRID SIMULATED' : '● ZONE GRID FROM BACKEND'}
-        </strong>
-        <span>{forecast.status}</span>
-        <span style={{ color: NEO.grey }}>{sourceLabel}</span>
+        {/* Provenance banner — the grid must never be mistaken for model output */}
+        <div style={{ ...bannerStyle, borderColor: simulatedGrid ? NEO.amber : NEO.green }}>
+          <strong style={{ color: simulatedGrid ? '#92400E' : '#14532D' }}>
+            {simulatedGrid ? '⚠ ZONE GRID SIMULATED' : '● ZONE GRID FROM BACKEND'}
+          </strong>
+          <span>{forecast.status}</span>
+          <span style={{ color: NEO.grey }}>{sourceLabel}</span>
+        </div>
       </div>
 
       <div style={{ position: 'absolute', bottom: 16, left: 16, zIndex: 10, width: 300 }}>
@@ -146,27 +174,41 @@ const compassStyle = {
   placeItems: 'center',
 };
 
-const legendStyle = {
+const rightColumnStyle = {
   position: 'absolute',
   top: 16,
   right: 16,
   zIndex: 10,
-  background: NEO.surface,
-  border: HARD.border,
+  width: 210,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  alignItems: 'stretch',
+  // The column itself must not swallow clicks meant for the canvas behind it.
+  pointerEvents: 'none',
+};
+
+const legendRowStyle = { display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 };
+
+const swatchStyle = { width: 9, height: 9, border: `1px solid ${NEO.ink}`, flexShrink: 0 };
+
+const legendBodyStyle = {
   padding: '8px 10px',
   fontFamily: MONO,
   fontSize: 9,
   fontWeight: 'bold',
   color: NEO.ink,
-  boxShadow: `3px 3px 0 ${NEO.ink}`,
+};
+
+const legendCaptionStyle = {
+  fontSize: 8,
+  letterSpacing: '0.06em',
+  color: NEO.grey,
+  marginBottom: 5,
 };
 
 const bannerStyle = {
-  position: 'absolute',
-  top: 152,
-  right: 16,
-  zIndex: 10,
-  maxWidth: 240,
+  pointerEvents: 'auto',
   background: NEO.surface,
   border: `2px solid ${NEO.amber}`,
   padding: '8px 10px',
