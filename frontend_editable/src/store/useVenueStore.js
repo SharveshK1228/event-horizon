@@ -120,8 +120,14 @@ export const useVenueStore = create((set, get) => ({
       answer: null,
       signals: [],
     });
-    if (mode === 'backend') get().startPolling();
-    else get().replayDemoSignals();
+    if (mode === 'backend') {
+      // Bring the server onto the scenario already on screen, otherwise the
+      // console can show one story while the backend reports another.
+      api.setScenario(get().scenario).catch((cause) => set({ error: cause.message }));
+      get().startPolling();
+    } else {
+      get().replayDemoSignals();
+    }
     if (isTimelineScenario(get().scenario)) get().startClock();
   },
 

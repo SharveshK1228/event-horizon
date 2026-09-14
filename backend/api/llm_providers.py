@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from typing import Any
@@ -34,7 +35,9 @@ SYSTEM_PROMPT = (
     "Say plainly when the evidence does not support an answer. Every decision belongs to an "
     "authorised human. "
     "Answer in at most 120 words, in this order: what the evidence shows, what it does not "
-    "establish, then the SOP steps verbatim in the order given."
+    "establish, then the SOP steps verbatim in the order given. "
+    "Plain text only: no markdown, no asterisks, no headings, no bullet symbols. Number the "
+    "SOP steps 1., 2., 3. on their own lines."
 )
 
 # `gemini-flash-latest` rather than a pinned 2.5 release: Google has closed the
@@ -122,8 +125,25 @@ def generate(question: str, incident: dict[str, Any], sop: dict[str, Any]) -> tu
         # rather than surfacing as an error in front of an operator.
         return None
 
-    text = (text or "").strip()
+    text = plain_text(text or "")
     return (text, f"llm:{provider}/{model}") if text else None
+
+
+_MARKDOWN_EMPHASIS = re.compile(r"(\*\*|__|`)")
+_MARKDOWN_HEADING = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
+_MARKDOWN_BULLET = re.compile(r"^\s*[-*•]\s+", re.MULTILINE)
+
+
+def plain_text(text: str) -> str:
+    """Strip markdown the model may emit despite the prompt.
+
+    The console renders the answer as plain pre-wrapped text, so stray
+    asterisks and hashes would show up literally in front of an operator.
+    """
+    text = _MARKDOWN_EMPHASIS.sub("", text)
+    text = _MARKDOWN_HEADING.sub("", text)
+    text = _MARKDOWN_BULLET.sub("- ", text)
+    return text.strip()
 
 
 def _post_json(url: str, headers: dict[str, str], body: dict[str, Any]) -> dict[str, Any]:
